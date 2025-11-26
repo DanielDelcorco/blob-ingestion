@@ -4,28 +4,29 @@ receivers:
       grpc:
 
 processors:
-  batch:
+  batch: {}
 
 exporters:
-  logging:
-    loglevel: info
+  # substitui o antigo "logging"
+  debug:
+    verbosity: detailed
 
-  jaeger:
-    endpoint: jaeger:14250
-    tls:
-      insecure: true
+  # envia spans para o Jaeger via Zipkin
+  zipkin:
+    endpoint: "http://jaeger:9411/api/v2/spans"
 
+  # expõe métricas em uma porta nova
   prometheus:
-    endpoint: "0.0.0.0:8888"
+    endpoint: "0.0.0.0:8889"
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [jaeger, logging]
+      exporters: [zipkin, debug]
 
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [prometheus, logging]
+      exporters: [prometheus, debug]
