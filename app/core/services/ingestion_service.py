@@ -12,12 +12,18 @@ tracer = trace.get_tracer(__name__)
 
 
 class IngestionService:
-    def __init__(self, reader, writer, settings: IngestionSettings, logger: Logger, correlation_id: str):
+    def __init__(self, reader, writer, settings: IngestionSettings, logger: Logger, correlation_id: str, key_fields=None):
         self._reader = reader
         self._writer = writer
         self._settings = settings
         self._logger = logger
         self._correlation_id = correlation_id
+        # key_fields: list of document fields used to build the _id for upsert operations
+        # default kept for backward compatibility
+        if key_fields is None:
+            self._key_fields = ["defaultGroupId", "documentId"]
+        else:
+            self._key_fields = key_fields
 
         meter = metrics.get_meter(__name__)
         self._docs_counter = meter.create_counter("docs_ingested_total")
@@ -29,7 +35,7 @@ class IngestionService:
         return executor.submit(
             self._writer.upsert_many,
             list(docs),
-            ["defaultGroupId", "documentId"],
+            self._key_fields,
         )
 
     def run(self) -> int:
