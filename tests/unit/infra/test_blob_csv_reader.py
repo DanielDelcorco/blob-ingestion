@@ -40,6 +40,8 @@ def test_blob_csv_reader_applies_schema_and_boolean():
     assert len(chunks) == 1
 
     df = chunks[0]
-    assert list(df.columns) == ["code", "flag"]
+    assert set(df.columns) == {"code", "flag", "referenceDate", "updateDate"}
     assert df["code"].tolist() == [1, 2]
     assert df["flag"].tolist() == [True, False]
+    assert "referenceDate" in df.columns
+    assert "updateDate" in df.columns

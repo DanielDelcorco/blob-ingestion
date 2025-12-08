@@ -57,186 +57,142 @@ Azure Function (trigger)
 
 \`\`\`
 blob-ingestion/
-├── app/
-│   ├── config/          # logging + otel
-│   ├── core/            # domínio e regras
-│   ├── infra/           # Mongo + Blob
-│   └── utils/           # apoio
-├── functions/
-│   └── process_blob_event/
-├── tests/
-├── docker-compose.yml
-├── otel-config.yaml
-├── prometheus.yml
-└── requirements.txt
-\`\`\`
+# Blob Ingestion Service
 
----
+Azure Functions + MongoDB + Pandas + OpenTelemetry — pipeline para ingestão
+de CSVs armazenados em Azure Blob Storage e escrita por upsert no MongoDB.
 
-## ✅ 4. Pré-Requisitos
+Principais pontos:
+- Entrada HTTP trigger (`POST /api/process`) que seleciona o tipo de arquivo (`fileType`).
+- Pipeline configurável por tipo de arquivo (`app/config/file_types_config.py`).
+- Streaming CSV em chunks via `BlobCsvReader` + processamento paralelo com `IngestionService`.
+- Persistência com upsert no MongoDB via `MongoWriter`.
+- Observability: logs, métricas e traces via OpenTelemetry.
 
-- Python 3.10+
-- Docker e Docker Compose
-- Azure Functions Core Tools (local)
-- MongoDB local ou remoto
+**Observação:** o projeto foi refatorado para expor a função como HTTP trigger (request JSON com `fileType`).
 
----
+## Índice
 
-## ✅ 5. Setup Local
+- [Fluxo de processamento](#fluxo-de-processamento)
+- [Recursos disponíveis](#recursos-disponiveis)
+- [Rodando localmente](#rodando-localmente)
+- [Docker / Container](#docker--container)
+- [Testes](#testes)
+- [Instrumentação (logs, métricas, traces)](#instrumentacao-logs-metricas-traces)
+- [Variáveis de ambiente mínimas](#variaveis-de-ambiente-minimas)
 
-### 🔹 1. Criar ambiente
+## Fluxo de processamento
 
-\`\`\`bash
+1. Cliente envia `POST /api/process` com JSON: `{"fileType":"customer_data", "correlationId":"..."}`.
+2. A função valida e chama `get_file_type_config(fileType)`.
+3. `BlobClientFactory` constrói um `BlobClient` para o container/path configurado.
+4. `BlobCsvReader` faz stream do blob em chunks e normaliza colunas conforme `FileSchema`.
+5. `IngestionService` processa chunks em paralelo e chama `MongoWriter.bulk_upsert()` usando `key_fields` do `FileTypeConfig`.
+6. Métricas e spans são emitidos via OpenTelemetry; logs estruturados são gravados usando o logger central.
+
+## Recursos disponíveis
+
+- `app/config/file_types_config.py`: registro de tipos de arquivo — blob container, blob path, mapeamento de colunas, `key_fields`, collection.
+- `app/config/blob_config.py` / `MongoClientFactory`: fábricas para criar clientes (testáveis, isolam env vars).
+- `app/infra/blob/blob_csv_reader.py`: streaming CSV reader (pandas chunks, mapeamento, booleans).
+- `app/core/services/ingestion_service.py`: orquestrador (paralelismo, upsert, métricas).
+- `functions/process_blob_event/__init__.py`: entrada HTTP da Function.
+
+## Rodando localmente
+
+### 1) Ambiente virtual
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-\`\`\`
+```
 
-### 🔹 2. Definir variáveis
+### 2) Com Azure Functions Core Tools
 
-\`\`\`bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-export MONGO_URI=mongodb://localhost:27017
-export MONGO_DB_NAME=slp
-export MONGO_COLLECTION_NAME=defaultGroupDocument
-\`\`\`
-
----
-
-## ✅ 6. Observability Stack (Jaeger + Prometheus + Grafana)
-
-### 🔹 Subir tudo com 1 comando
-
-\`\`\`bash
-docker compose up -d
-\`\`\`
-
-### 🔹 Acessar ferramentas
-
-| Ferramenta | URL |
-|-----------|-----|
-| Jaeger (Tracing) | http://localhost:16686 |
-| Prometheus (Metrics) | http://localhost:9090 |
-| Grafana (Dashboards) | http://localhost:3000 |
-
-Login Grafana:
-
-\`\`\`
-user: admin
-pass: admin
-\`\`\`
-
-### 🔹 Configurar Grafana
-
-- Data Source → Prometheus
-- URL: `http://prometheus:9090`
-
----
-
-## ✅ 7. Visualizando os Traces
-
-1. Abrir http://localhost:16686  
-2. Selecionar o serviço:
-
-\`\`\`
-blob-ingestion-service
-\`\`\`
-
-3. Clicar **Find Traces**
-
-Você verá spans como:
-
-- `process_blob_event`
-- `ingestion_service`
-- `blob_download_and_parse`
-- `parse_csv_buffer`
-- `mongo_bulk_upsert`
-
----
-
-## ✅ 8. Métricas Disponíveis
-
-| Métrica | Descrição |
-|--------|-----------|
-| `docs_ingested_total` | Total de documentos processados |
-| `chunks_processed_total` | Total de chunks |
-| `mongo_docs_upserted_total` | Total upsertado |
-| `mongo_upsert_errors_total` | Erros no Mongo |
-| `process_memory_mb` | Memória consumida |
-
----
-
-## ✅ 9. Integração com Dynatrace (Opcional)
-
-### ✅ Sem OneAgent (via OTLP)
-
-\`\`\`bash
-export OTEL_EXPORTER_OTLP_ENDPOINT="https://<ENV>.live.dynatrace.com/api/v2/otlp"
-export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Api-Token <YOUR-TOKEN>"
-\`\`\`
-
-### ✅ Via OneAgent
-
-- Zero configuração adicional  
-- Tracing automático  
-- Detecta dependências automaticamente  
-
----
-
-## ✅ 10. Executar a Function Localmente
-
-\`\`\`bash
+```bash
 func start
-\`\`\`
+```
 
----
+Endpoint de teste (exemplo):
 
-## ✅ 11. Testes
+```http
+POST http://localhost:7071/api/process
+Content-Type: application/json
 
-\`\`\`bash
-pytest
-\`\`\`
+{ "fileType": "customer_data", "correlationId": "abc-123" }
+```
 
-Resultado esperado:
+## Docker / Container
 
-✅ 100% verde
+Há um `Dockerfile` preparado para o runtime do Azure Functions.
 
----
+### Build local
 
-## ✅ 12. Troubleshooting
+```bash
+docker build -t blob-ingestion:local .
+```
 
-### ❌ `"UNAVAILABLE"` OTEL Export
-Sem collector rodando.  
-✅ Rode:
+### Run local (com arquivo de ambiente)
 
-\`\`\`bash
-docker compose up -d
-\`\`\`
+```bash
+cp local.settings.env.example local.settings.env
+# editar local.settings.env e preencher segredos
+docker run --env-file local.settings.env -p 8080:80 blob-ingestion:local
+```
 
-### ❌ Deprecation `utcnow()`
-Corrigido usando `datetime.now(UTC)`.
+### Publicar imagem (exemplo ACR)
 
-### ❌ MongoWriter AttributeError
-Versão corrigida já inclusa com métricas lazy.
+```bash
+docker tag blob-ingestion:local myacr.azurecr.io/blob-ingestion:v1
+docker push myacr.azurecr.io/blob-ingestion:v1
+az functionapp create -g <rg> -n <name> --plan <plan> --storage-account <sa> \
+       --deployment-container-image-name myacr.azurecr.io/blob-ingestion:v1
+```
 
----
+## Testes
 
-## ✅ 13. Roadmap
+```bash
+.venv/bin/python -m pytest tests/unit/ -q
+```
 
-- Retry com backoff no Mongo  
-- Dead Letter Queue  
-- Multi-schema CSV registry  
-- Dashboard Grafana pré-configurado  
-- CI/CD com GitHub Actions  
+## Instrumentação (logs, métricas, traces)
 
----
+- **Logging:** configurado em `app/config/logging_config.py`. Use `LOG_LEVEL` para controlar verbosidade.
+- **Traces e métricas:** configurados em `app/config/otel.py`.
+       - `setup_otel(logger)` retorna providers e uma função `shutdown_otel()` idempotente que deve ser chamada ao finalizar a Function.
+       - Configure `OTEL_EXPORTER_OTLP_ENDPOINT` para apontar para o collector (ex.: `http://localhost:4317`).
 
-## ✅ 14. Licença
+- **Métricas principais**:
+       - `docs_ingested_total`
+       - `chunks_processed_total`
+       - `mongo_docs_upserted_total`
+       - `mongo_upsert_errors_total`
+       - `process_memory_mb`
 
-Uso interno / educacional — adaptar conforme necessidade.
+- **Traces:** spans criados para `process_blob_event`, `ingestion_service` e operações infra (blob/mongo).
 
----
+## Variáveis de ambiente mínimas
 
-## ✅ 15. Contato
+Preencha `local.settings.env` com as chaves necessárias (existe o `local.settings.env.example` no repositório):
 
-Para dúvidas, melhorias ou evolução do pipeline, só chamar! 🚀
+- `AZURE_BLOB_ACCOUNT_NAME`, `AZURE_BLOB_SAS_TOKEN`
+- `DEFAULT_GROUP_BLOB_CONTAINER`, `CUSTOMER_BLOB_CONTAINER`
+- `MONGO_URI`, `MONGO_DB_NAME`, `DEFAULT_GROUP_MONGO_COLLECTION`, `CUSTOMER_MONGO_COLLECTION`
+- `OTEL_EXPORTER_OTLP_ENDPOINT` (opcional)
+- `FUNCTIONS_WORKER_RUNTIME=python`
+- `AzureWebJobsStorage` (Functions host requirement)
+
+## Notas operacionais
+
+- Se não houver OTLP collector ativo, verá `StatusCode.UNAVAILABLE` nos logs; isto não impede o processamento.
+- `get_file_type_config()` valida que `key_fields` configurados existam no `schema.column_mapping`.
+- Para evitar mensagens de exportador durante testes, desabilite exportadores ou configure um endpoint válido.
+
+## Contribuição
+
+- Execute os testes antes de abrir PRs. Bugfixes e melhorias em `file_types_config` e factories são bem-vindas.
+
+## Contato
+
+- Abra uma issue ou PR para melhorias ou dúvidas.
