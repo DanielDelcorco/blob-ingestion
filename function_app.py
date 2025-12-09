@@ -7,6 +7,7 @@ from datetime import datetime, UTC
 from uuid import uuid4
 
 import azure.functions as func
+from azure.core import exceptions as azure_exceptions
 from opentelemetry import trace
 
 from app.config.logging_config import configure_logging
@@ -95,7 +96,83 @@ def processBlobEvent(req: func.HttpRequest) -> func.HttpResponse:
             key_fields = getattr(file_config, "key_fields", None)
             service = IngestionService(reader, writer, settings, LOGGER, correlation_id, key_fields)
 
-            total_docs = service.run()
+            try:
+                total_docs = service.run()
+            except azure_exceptions.ResourceNotFoundError as e:
+                # Container or blob not found — concise error for logs, full details at DEBUG
+                rid = None
+                try:
+                    resp = getattr(e, "response", None)
+                    headers = getattr(resp, "headers", None)
+                    if headers:
+                        rid = headers.get("x-ms-request-id") or headers.get("RequestId")
+                except Exception:
+                    rid = None
+
+                short_msg = str(e).splitlines()[0]
+                LOGGER.error(
+                    "event=process_blob_event_failed container_not_found file_type=%s container=%s blob=%s correlation_id=%s request_id=%s error=%s",
+                    file_type,
+                    getattr(file_config, "blob_container", "-"),
+                    getattr(file_config, "blob_path", "-"),
+                    correlation_id,
+                    rid,
+                    short_msg,
+                    exc_info=False,
+                )
+                # also log full exception at DEBUG for troubleshooting
+                LOGGER.debug("full exception", exc_info=True)
+
+                # extract error code when available
+                error_code = None
+                try:
+                    error_code = getattr(e, "error_code", None)
+                    if not error_code:
+                        resp = getattr(e, "response", None)
+                        headers = getattr(resp, "headers", None)
+                        if headers:
+                            error_code = headers.get("x-ms-error-code") or headers.get("x-ms-errorcode") or headers.get("ErrorCode")
+                except Exception:
+                    error_code = None
+
+                if not error_code:
+                    error_code = "ContainerNotFound"
+
+                return func.HttpResponse(
+                    json.dumps({
+                        "error": "Blob container or blob not found",
+                        "errorCode": error_code,
+                        "correlationId": correlation_id,
+                    }),
+                    status_code=404,
+                    mimetype="application/json",
+                )
+            except azure_exceptions.ClientAuthenticationError as e:
+                short_msg = str(e).splitlines()[0]
+                LOGGER.error(
+                    "event=process_blob_event_failed auth_error file_type=%s correlation_id=%s error=%s",
+                    file_type,
+                    correlation_id,
+                    short_msg,
+                    exc_info=False,
+                )
+                LOGGER.debug("full exception", exc_info=True)
+                # try to extract an error code
+                error_code = getattr(e, "error_code", None)
+                if not error_code:
+                    resp = getattr(e, "response", None)
+                    headers = getattr(resp, "headers", None)
+                    if headers:
+                        error_code = headers.get("x-ms-error-code") or headers.get("x-ms-errorcode") or headers.get("ErrorCode")
+                if not error_code:
+                    error_code = "AuthenticationFailed"
+
+                return func.HttpResponse(
+                    json.dumps({"error": "Blob authentication failed", "errorCode": error_code, "correlationId": correlation_id}),
+                    status_code=500,
+                    mimetype="application/json",
+                )
+
             writer.delete_older_than(reference_date)
             writer.close()
 
@@ -118,14 +195,19 @@ def processBlobEvent(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         except Exception as e:
-            LOGGER.exception(
-                f"event=process_blob_event_failed "
-                f"correlation_id={correlation_id} "
-                f"error={str(e)}"
+            # Log concise message, keep full traceback at DEBUG only
+            short_msg = str(e).splitlines()[0]
+            LOGGER.error(
+                "event=process_blob_event_failed correlation_id=%s error=%s",
+                correlation_id,
+                short_msg,
+                exc_info=False,
             )
+            LOGGER.debug("full exception", exc_info=True)
             return func.HttpResponse(
                 json.dumps({
                     "error": "Failed to process blob",
+                    "errorCode": "InternalError",
                     "correlationId": correlation_id
                 }),
                 status_code=500,

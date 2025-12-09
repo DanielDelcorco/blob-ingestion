@@ -39,23 +39,44 @@ class BlobClientFactory:
         account_name = os.getenv("AZURE_BLOB_ACCOUNT_NAME")
         sas_token = os.getenv("AZURE_BLOB_SAS_TOKEN")
 
-        if not account_name or not sas_token:
-            raise ValueError("Azure Blob Storage credentials not configured (AZURE_BLOB_ACCOUNT_NAME or AZURE_BLOB_SAS_TOKEN)")
+        if not sas_token:
+            raise ValueError("Azure Blob Storage SAS token not configured (AZURE_BLOB_SAS_TOKEN)")
 
-        # Normalizar token e blob path para evitar caracteres inválidos
+        # Prefer connection string (AzureWebJobsStorage or explicit) for local Azurite
+        conn_str = os.getenv("AZURE_BLOB_CONNECTION_STRING") or os.getenv("AzureWebJobsStorage")
+        blob_name = getattr(file_config, "blob_path", "") or ""
+        blob_name = blob_name.lstrip("/")
+
+        logger = logging.getLogger(__name__)
+
+        if conn_str:
+            # Use connection string flow (good for Azurite / local development)
+            logger.debug("Creating BlobClient from connection string, container=%s blob=%s", file_config.blob_container, blob_name)
+            try:
+                client = BlobClient.from_connection_string(conn_str, container_name=file_config.blob_container, blob_name=blob_name)
+            except Exception:
+                logger.exception("Failed to construct BlobClient from connection string")
+                raise
+            return client
+
+        # Fallback: use SAS token + base URL
+        # Normalizar token
         sas_token = sas_token.strip()
         if sas_token.startswith("?"):
             sas_token = sas_token[1:]
 
-        blob_name = getattr(file_config, "blob_path", "") or ""
-        blob_name = blob_name.lstrip("/")
+        # Obter base URL do Blob via variável de ambiente (preferível)
+        base_blob_url = os.getenv("AZURE_BLOB_URL")
+        if base_blob_url:
+            base_blob_url = base_blob_url.rstrip("/")
+        elif account_name:
+            base_blob_url = f"https://{account_name}.blob.core.windows.net"
+        else:
+            raise ValueError("Azure Blob Storage base URL not configured (AZURE_BLOB_URL or AZURE_BLOB_ACCOUNT_NAME)")
 
-        account_url = f"https://{account_name}.blob.core.windows.net"
-
-        logger = logging.getLogger(__name__)
         logger.debug(
-            "Creating BlobClient account_url=%s container=%s blob=%s sas_len=%d",
-            account_url,
+            "Creating BlobClient base_url=%s container=%s blob=%s sas_len=%d",
+            base_blob_url,
             file_config.blob_container,
             blob_name,
             len(sas_token),
@@ -64,7 +85,7 @@ class BlobClientFactory:
         # Use the credential parameter instead of constructing a URL string.
         try:
             client = BlobClient(
-                account_url=account_url,
+                account_url=base_blob_url,
                 container_name=file_config.blob_container,
                 blob_name=blob_name,
                 credential=sas_token,
