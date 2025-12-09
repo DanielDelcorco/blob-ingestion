@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 import json
 import azure.functions as func
 
-from functions.process_blob_event import process_blob_event
+from function_app import processBlobEvent
 
 
 class DummyHttpRequest:
@@ -21,16 +21,16 @@ def test_process_blob_event_happy_path(monkeypatch):
     fake_mongo_writer = MagicMock()
 
     with patch(
-        "functions.process_blob_event.BlobClientFactory.create",
+        "function_app.BlobClientFactory.create",
         return_value=fake_blob_client,
     ), patch(
-        "functions.process_blob_event.MongoClientFactory.create",
+        "function_app.MongoClientFactory.create",
         return_value=fake_mongo_writer,
     ), patch(
-        "functions.process_blob_event.IngestionService.run",
+        "function_app.IngestionService.run",
         return_value=100,
     ) as run_mock:
-        response = process_blob_event(req)
+        response = processBlobEvent(req)
         
         assert response.status_code == 200
         assert run_mock.called
@@ -45,7 +45,7 @@ def test_process_blob_event_missing_file_type():
     """Testa request sem 'fileType'"""
     req = DummyHttpRequest({})
     
-    response = process_blob_event(req)
+    response = processBlobEvent(req)
     
     assert response.status_code == 400
     body = json.loads(response.get_body())
@@ -56,7 +56,7 @@ def test_process_blob_event_invalid_file_type():
     """Testa request com tipo de arquivo inválido"""
     req = DummyHttpRequest({"fileType": "invalid_type"})
     
-    response = process_blob_event(req)
+    response = processBlobEvent(req)
     
     assert response.status_code == 400
     body = json.loads(response.get_body())
@@ -68,10 +68,10 @@ def test_process_blob_event_missing_credentials():
     req = DummyHttpRequest({"fileType": "default_group"})
     
     with patch(
-        "functions.process_blob_event.BlobClientFactory.create",
+        "function_app.BlobClientFactory.create",
         side_effect=ValueError("Azure Blob Storage credentials not configured"),
     ):
-        response = process_blob_event(req)
+        response = processBlobEvent(req)
         
         assert response.status_code == 500
         body = json.loads(response.get_body())
