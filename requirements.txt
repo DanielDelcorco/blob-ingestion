@@ -1,16 +1,16 @@
-azure-functions
-azure-storage-blob
-pymongo
-pandas
-psutil
+azure-functions==1.14.0
+azure-storage-blob==12.22.1
+pymongo==4.5.1
+pandas==2.2.3
+psutil==5.9.5
 
-opentelemetry-api
-opentelemetry-sdk
-opentelemetry-exporter-otlp
-opentelemetry-exporter-otlp-proto-grpc
-opentelemetry-instrumentation-requests
-opentelemetry-instrumentation-pymongo
+opentelemetry-api==1.14.0
+opentelemetry-sdk==1.14.0
+opentelemetry-exporter-otlp==1.14.0
+opentelemetry-exporter-otlp-proto-grpc==1.14.0
+opentelemetry-instrumentation-requests==1.14.0
+opentelemetry-instrumentation-pymongo==1.14.0
 
-pytest
-pytest-cov
-debugpy
+pytest==7.4.2
+pytest-cov==4.1.0
+debugpy==1.8.17
