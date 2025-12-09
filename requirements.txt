@@ -13,3 +13,4 @@ opentelemetry-instrumentation-pymongo
 
 pytest
 pytest-cov
+debugpy
