@@ -74,9 +74,9 @@ def processBlobEvent(req: func.HttpRequest) -> func.HttpResponse:
 
             reference_date = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.000+00:00")
 
-            # Criar BlobClient a partir do tipo de arquivo
+            # Criar BlobClient a partir do objeto de configuração do tipo de arquivo
             try:
-                blob_client = BlobClientFactory.create(file_type)
+                blob_client = BlobClientFactory.create(file_config)
             except ValueError as e:
                 LOGGER.error(f"event=missing_blob_credentials correlation_id={correlation_id} error={str(e)}")
                 return func.HttpResponse(
@@ -90,7 +90,7 @@ def processBlobEvent(req: func.HttpRequest) -> func.HttpResponse:
 
             # Criar BlobClient e MongoWriter a partir do tipo de arquivo
             reader = BlobCsvReader(blob_client, file_config.schema, settings, LOGGER)
-            writer = MongoClientFactory.create(file_type, LOGGER)
+            writer = MongoClientFactory.create(file_config, LOGGER)
             # key_fields pode ser definido por tipo; passa None para manter default
             key_fields = getattr(file_config, "key_fields", None)
             service = IngestionService(reader, writer, settings, LOGGER, correlation_id, key_fields)

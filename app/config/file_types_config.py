@@ -12,9 +12,12 @@ class FileTypeConfig:
     - name: identificador do tipo
     - blob_container: nome do container
     - blob_path: caminho estático do blob (padrão)
+    - processed_blob_container: container destino após o processamento (opcional)
+    - processed_blob_path: caminho/nome do arquivo destino após o processamento (opcional)
     - schema: mapeamento de colunas e booleanos
     - key_fields: chaves usadas para upsert (opcional, usa default se não setado)
     - mongo_collection: collection override para esse tipo (opcional)
+    - mongo_db: database do Mongo para este tipo (opcional, usa MONGO_DB_NAME por padrão)
     """
     name: str
     blob_container: str
@@ -22,6 +25,9 @@ class FileTypeConfig:
     schema: FileSchema
     key_fields: Optional[List[str]] = None
     mongo_collection: Optional[str] = None
+    processed_blob_container: Optional[str] = None
+    processed_blob_path: Optional[str] = None
+    mongo_db: Optional[str] = None
 
 
 # Mapeamento de tipos de arquivo para suas configurações
@@ -42,6 +48,9 @@ FILE_TYPES_CONFIG: Dict[str, FileTypeConfig] = {
         ),
         key_fields=["defaultGroupId", "documentId"],
         mongo_collection=os.getenv("DEFAULT_GROUP_MONGO_COLLECTION"),
+        processed_blob_container=os.getenv("DEFAULT_GROUP_PROCESSED_CONTAINER"),
+        processed_blob_path=os.getenv("DEFAULT_GROUP_PROCESSED_PATH", "processed/default_group.csv"),
+        mongo_db=os.getenv("DEFAULT_GROUP_MONGO_DB", os.getenv("MONGO_DB_NAME")),
     ),
     "customer_data": FileTypeConfig(
         name="customer_data",
@@ -59,6 +68,9 @@ FILE_TYPES_CONFIG: Dict[str, FileTypeConfig] = {
         ),
         key_fields=["customerId"],
         mongo_collection=os.getenv("CUSTOMER_MONGO_COLLECTION", "customerCollection"),
+        processed_blob_container=os.getenv("CUSTOMER_PROCESSED_CONTAINER"),
+        processed_blob_path=os.getenv("CUSTOMER_PROCESSED_PATH", "processed/customer_data.csv"),
+        mongo_db=os.getenv("CUSTOMER_MONGO_DB", os.getenv("MONGO_DB_NAME")),
     ),
 }
 
