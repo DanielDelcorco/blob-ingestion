@@ -4,19 +4,31 @@ from logging import Logger
 from opentelemetry import trace
 from datetime import datetime, UTC
 from typing import Iterable
-from app.core.models.file_schema import FileSchema
 from app.core.models.ingestion_settings import IngestionSettings
 from app.infra.blob.StreamWrapper import StreamWrapper
 
 tracer = trace.get_tracer(__name__)
 
 
-class BlobCsvReader:
-    def __init__(self, blob_client: BlobClient, schema: FileSchema, settings: IngestionSettings, logger: Logger):
-        self._blob_client = blob_client
-        self._schema = schema
+class   BlobCsvReader:
+    def __init__(self, settings: IngestionSettings, logger: Logger):
         self._settings = settings
         self._logger = logger
+        self._blob_client: BlobClient = settings.blob_client_factory()
+
+    def create(self) -> BlobClient:
+        
+        if not self._settings.blob.account_url or not self._settings.blob.container_name or not self._settings.blob.account_key:
+            raise ValueError("Blob storage configuration is incomplete.")
+        
+        self._blob_client = BlobClient(
+            account_url=self._settings.blob.account_url,
+            container_name=self._settings.blob.container_name,
+            blob_name="",
+            credential=self._settings.blob.account_key
+        )
+
+        return self._blob_client
 
     def iter_chunks(self) -> Iterable[pd.DataFrame]:
         with tracer.start_as_current_span("blob_download_and_parse"):

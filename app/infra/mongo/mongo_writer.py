@@ -4,7 +4,8 @@ from pymongo import MongoClient, UpdateOne
 from logging import Logger
 from opentelemetry import trace, metrics
 
-from app.core.models.mongo_settings import MongoSettings
+from app.core.models.ingestion_settings import MongoSettings
+
 
 tracer = trace.get_tracer(__name__)
 

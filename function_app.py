@@ -10,9 +10,9 @@ import azure.functions as func
 from azure.core import exceptions as azure_exceptions
 from opentelemetry import trace
 
-from app.config.logging_config import configure_logging
+from app.config.logging_config import configure_logging, set_correlation_id
 from app.config.otel import setup_otel
-from app.config.file_types_config import get_file_type_config
+from app.config.ingestion_config import get_file_type_config, get_ingestion_settings
 from app.config.blob_config import BlobClientFactory
 from app.config.mongo_config import MongoClientFactory
 from app.core.models.ingestion_settings import IngestionSettings
@@ -24,10 +24,16 @@ LOGGER = configure_logging()
 tracer_provider, meter_provider, shutdown_otel = setup_otel(LOGGER)
 tracer = trace.get_tracer(__name__)
 
+ingested_counter = meter.create_counter(
+    name="blob_files_ingested_total",
+    unit="1",
+    description="Total number of blob files ingested successfully"
+)
+
 # Create the main FunctionApp instance
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
-
+@app.function_name(name="processBlobEvent")
 @app.route(route="process", methods=["POST"])
 def processBlobEvent(req: func.HttpRequest) -> func.HttpResponse:
     """
@@ -38,11 +44,13 @@ def processBlobEvent(req: func.HttpRequest) -> func.HttpResponse:
         "fileType": "default_group"  # Tipo do arquivo conforme configurado em file_types_config.py
     }
     """
-    correlation_id = str(uuid4())
+    correlation_id = req.headers.get("X-Correlation-ID") or str(uuid4())
+    set_correlation_id(correlation_id)
     
-    with tracer.start_as_current_span("process_blob_event"):
+    with tracer.start_as_current_span("process_blob_event") as span:
         try:
             # Extrair tipo de arquivo do request
+            span.set_attribute("correlation_id", correlation_id)
             try:
                 req_json = req.get_json()
                 file_type = req_json.get("fileType")
@@ -62,7 +70,7 @@ def processBlobEvent(req: func.HttpRequest) -> func.HttpResponse:
 
             # Obter configuração do tipo de arquivo
             try:
-                file_config = get_file_type_config(file_type)
+                settings = get_ingestion_settings(file_type)
             except ValueError as e:
                 LOGGER.error(f"event=invalid_file_type file_type={file_type} correlation_id={correlation_id}")
                 return func.HttpResponse(
@@ -73,114 +81,19 @@ def processBlobEvent(req: func.HttpRequest) -> func.HttpResponse:
 
             LOGGER.info(f"event=processing_started file_type={file_type} correlation_id={correlation_id}")
 
-            reference_date = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.000+00:00")
+            service = IngestionService(settings, LOGGER)
+            total_docs = service.run()
 
-            # Criar BlobClient a partir do objeto de configuração do tipo de arquivo
-            try:
-                blob_client = BlobClientFactory.create(file_config)
-            except ValueError as e:
-                LOGGER.error(f"event=missing_blob_credentials correlation_id={correlation_id} error={str(e)}")
-                return func.HttpResponse(
-                    json.dumps({"error": str(e)}),
-                    status_code=500,
-                    mimetype="application/json"
-                )
-
-            # Configurações de ingestão
-            settings = IngestionSettings()
-
-            # Criar BlobClient e MongoWriter a partir do tipo de arquivo
-            reader = BlobCsvReader(blob_client, file_config.schema, settings, LOGGER)
-            writer = MongoClientFactory.create(file_config, LOGGER)
-            # key_fields pode ser definido por tipo; passa None para manter default
-            key_fields = getattr(file_config, "key_fields", None)
-            service = IngestionService(reader, writer, settings, LOGGER, correlation_id, key_fields)
-
-            try:
-                total_docs = service.run()
-            except azure_exceptions.ResourceNotFoundError as e:
-                # Container or blob not found — concise error for logs, full details at DEBUG
-                rid = None
-                try:
-                    resp = getattr(e, "response", None)
-                    headers = getattr(resp, "headers", None)
-                    if headers:
-                        rid = headers.get("x-ms-request-id") or headers.get("RequestId")
-                except Exception:
-                    rid = None
-
-                short_msg = str(e).splitlines()[0]
-                LOGGER.error(
-                    "event=process_blob_event_failed container_not_found file_type=%s container=%s blob=%s correlation_id=%s request_id=%s error=%s",
-                    file_type,
-                    getattr(file_config, "blob_container", "-"),
-                    getattr(file_config, "blob_path", "-"),
-                    correlation_id,
-                    rid,
-                    short_msg,
-                    exc_info=False,
-                )
-                # also log full exception at DEBUG for troubleshooting
-                LOGGER.debug("full exception", exc_info=True)
-
-                # extract error code when available
-                error_code = None
-                try:
-                    error_code = getattr(e, "error_code", None)
-                    if not error_code:
-                        resp = getattr(e, "response", None)
-                        headers = getattr(resp, "headers", None)
-                        if headers:
-                            error_code = headers.get("x-ms-error-code") or headers.get("x-ms-errorcode") or headers.get("ErrorCode")
-                except Exception:
-                    error_code = None
-
-                if not error_code:
-                    error_code = "ContainerNotFound"
-
-                return func.HttpResponse(
-                    json.dumps({
-                        "error": "Blob container or blob not found",
-                        "errorCode": error_code,
-                        "correlationId": correlation_id,
-                    }),
-                    status_code=404,
-                    mimetype="application/json",
-                )
-            except azure_exceptions.ClientAuthenticationError as e:
-                short_msg = str(e).splitlines()[0]
-                LOGGER.error(
-                    "event=process_blob_event_failed auth_error file_type=%s correlation_id=%s error=%s",
-                    file_type,
-                    correlation_id,
-                    short_msg,
-                    exc_info=False,
-                )
-                LOGGER.debug("full exception", exc_info=True)
-                # try to extract an error code
-                error_code = getattr(e, "error_code", None)
-                if not error_code:
-                    resp = getattr(e, "response", None)
-                    headers = getattr(resp, "headers", None)
-                    if headers:
-                        error_code = headers.get("x-ms-error-code") or headers.get("x-ms-errorcode") or headers.get("ErrorCode")
-                if not error_code:
-                    error_code = "AuthenticationFailed"
-
-                return func.HttpResponse(
-                    json.dumps({"error": "Blob authentication failed", "errorCode": error_code, "correlationId": correlation_id}),
-                    status_code=500,
-                    mimetype="application/json",
-                )
-
-            writer.delete_older_than(reference_date)
-            writer.close()
+            ingested_counter.add(
+                total_docs,
+                {"file_type": file_type, "correlation_id": correlation_id}
+            )
+        
+            span.set_attribute("file_type", file_type)
+            span.set_attribute("docs_processed", total_docs)
 
             LOGGER.info(
-                f"event=process_blob_event_success "
-                f"file_type={file_type} "
-                f"total_docs={total_docs} "
-                f"correlation_id={correlation_id}"
+                f"event=processing_completed file_type={file_type} total_docs={total_docs} correlation_id={correlation_id}"
             )
 
             return func.HttpResponse(

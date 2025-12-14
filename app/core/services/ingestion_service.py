@@ -6,30 +6,28 @@ from logging import Logger
 from opentelemetry import trace, metrics
 
 from app.core.models.ingestion_settings import IngestionSettings
+from app.infra.blob.blob_csv_reader import BlobCsvReader
+from app.infra.mongo.mongo_writer import MongoWriter
 from app.utils.memory import MemoryObserver
 
 tracer = trace.get_tracer(__name__)
-
+meter = metrics.get_meter(__name__)
 
 class IngestionService:
-    def __init__(self, reader, writer, settings: IngestionSettings, logger: Logger, correlation_id: str, key_fields=None):
-        self._reader = reader
-        self._writer = writer
+    def __init__(self, settings: IngestionSettings, logger: Logger):
         self._settings = settings
         self._logger = logger
-        self._correlation_id = correlation_id
-        # key_fields: list of document fields used to build the _id for upsert operations
-        # default kept for backward compatibility
-        if key_fields is None:
-            self._key_fields = ["defaultGroupId", "documentId"]
-        else:
-            self._key_fields = key_fields
 
-        meter = metrics.get_meter(__name__)
         self._docs_counter = meter.create_counter("docs_ingested_total")
         self._chunk_counter = meter.create_counter("chunks_processed_total")
-
+        self._latency_histogram = meter.create_histogram(
+            name="ingestion_latency_seconds",
+            unit="s",
+            description="Latency of ingestion process in seconds"
+        )
         self._memory_observer = MemoryObserver(logger)
+        self._reader = BlobCsvReader(settings, logger)
+        self._writer = MongoWriter(settings.mongo, logger)
 
     def _submit(self, executor, docs):
         return executor.submit(

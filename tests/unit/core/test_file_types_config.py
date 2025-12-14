@@ -1,4 +1,4 @@
-from app.config.file_types_config import FileTypeConfig
+from app.config.ingestion_config import FileTypeConfig
 from app.core.models.file_schema import FileSchema
 import pytest
 
@@ -20,7 +20,7 @@ def test_validate_key_fields_success():
     )
 
     # Should not raise
-    from app.config.file_types_config import get_file_type_config, FILE_TYPES_CONFIG
+    from app.config.ingestion_config import get_file_type_config, FILE_TYPES_CONFIG
 
     # Validate helper logic by calling the internal check via temporarily invoking the same validation
     # (we don't mutate global FILE_TYPES_CONFIG here; just ensure our cfg's keys are valid)
@@ -51,11 +51,11 @@ def test_validate_key_fields_failure():
 
     # If a real lookup were performed via FILE_TYPES_CONFIG, it should raise ValueError.
     # We'll temporarily insert and then remove to simulate the behavior.
-    from app.config.file_types_config import FILE_TYPES_CONFIG
+    from app.config.ingestion_config import FILE_TYPES_CONFIG
 
     FILE_TYPES_CONFIG["bad_test_temp"] = cfg
     try:
-        from app.config.file_types_config import get_file_type_config as g
+        from app.config.ingestion_config import get_file_type_config as g
 
         with pytest.raises(ValueError):
             g("bad_test_temp")
