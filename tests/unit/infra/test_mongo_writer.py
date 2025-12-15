@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-from app.core.models.mongo_settings import MongoSettings
+from app.core.models.ingestion_settings import MongoSettings
 from app.infra.mongo.mongo_writer import MongoWriter
 
 

@@ -1,63 +1,34 @@
-from app.config.file_types_config import FileTypeConfig
-from app.core.models.file_schema import FileSchema
+from app.config.ingestion_config import get_ingestion_settings, FILE_TYPES_CONFIG
+from app.core.models.ingestion_settings import FileSchema, FileType
 import pytest
 
 
 def test_validate_key_fields_success():
-    schema = FileSchema(
-        name="test",
-        column_mapping={"col_a": "A", "col_b": "B"},
-        boolean_cols=[],
-    )
-
-    cfg = FileTypeConfig(
-        name="test",
-        blob_container="c",
-        blob_path="p",
-        schema=schema,
-        key_fields=["A"],
-        mongo_collection=None,
-    )
-
-    # Should not raise
-    from app.config.file_types_config import get_file_type_config, FILE_TYPES_CONFIG
-
-    # Validate helper logic by calling the internal check via temporarily invoking the same validation
-    # (we don't mutate global FILE_TYPES_CONFIG here; just ensure our cfg's keys are valid)
-    mapped = set(cfg.schema.column_mapping.values())
-    missing = [k for k in cfg.key_fields if k not in mapped]
-    assert missing == []
+    # Use an existing configured file type (should be valid by default)
+    settings = get_ingestion_settings(FileType.DEFAULT_GROUP)
+    assert settings.schema is not None
+    # validation happens inside get_ingestion_settings, so no exception means success
 
 
 def test_validate_key_fields_failure():
-    schema = FileSchema(
-        name="test",
-        column_mapping={"col_x": "X"},
-        boolean_cols=[],
-    )
+    # Temporarily inject an invalid key_fields into an existing FILE_TYPES_CONFIG entry
+    key = FileType.DEFAULT_GROUP
+    original_schema = FILE_TYPES_CONFIG[key].schema
 
-    cfg = FileTypeConfig(
-        name="bad",
-        blob_container="c",
-        blob_path="p",
-        schema=schema,
-        key_fields=["MISSING_FIELD"],
-        mongo_collection=None,
-    )
-
-    mapped = set(cfg.schema.column_mapping.values())
-    missing = [k for k in cfg.key_fields if k not in mapped]
-    assert missing == ["MISSING_FIELD"]
-
-    # If a real lookup were performed via FILE_TYPES_CONFIG, it should raise ValueError.
-    # We'll temporarily insert and then remove to simulate the behavior.
-    from app.config.file_types_config import FILE_TYPES_CONFIG
-
-    FILE_TYPES_CONFIG["bad_test_temp"] = cfg
     try:
-        from app.config.file_types_config import get_file_type_config as g
+        # set an invalid key_fields list that doesn't match mapped columns
+        FILE_TYPES_CONFIG[key].schema = FileSchema(
+            name="temp",
+            column_mapping={"col_x": "X"},
+            boolean_cols=[],
+        )
+
+        # now requesting settings should raise due to mismatched key_fields if set
+        # ensure the schema has key_fields that will be considered invalid
+        FILE_TYPES_CONFIG[key].schema.key_fields = ["MISSING_FIELD"]
 
         with pytest.raises(ValueError):
-            g("bad_test_temp")
+            get_ingestion_settings(key)
     finally:
-        FILE_TYPES_CONFIG.pop("bad_test_temp", None)
+        # restore original schema
+        FILE_TYPES_CONFIG[key].schema = original_schema

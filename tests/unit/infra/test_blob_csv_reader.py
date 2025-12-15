@@ -1,6 +1,5 @@
-from unittest.mock import MagicMock
-from app.core.models.file_schema import FileSchema
-from app.core.models.ingestion_settings import IngestionSettings
+from unittest.mock import MagicMock, patch
+from app.core.models.ingestion_settings import FileSchema, IngestionSettings, BlobSettings, MongoSettings
 from app.infra.blob.blob_csv_reader import BlobCsvReader
 
 
@@ -31,12 +30,28 @@ def test_blob_csv_reader_applies_schema_and_boolean():
         boolean_cols=["flag"],
     )
 
-    settings = IngestionSettings(chunk_size=10, max_workers=1)
+    settings = IngestionSettings(
+        chunk_size=10,
+        max_workers=1,
+        encoding="cp1252",
+        schema=schema,
+        mongo=MongoSettings(uri="mongodb://localhost:27017", database="db", collection="col"),
+        blob=BlobSettings(
+            account_url="http://localhost:10000/",
+            account_key="key",
+            container_name="devstoreaccount1",
+            input_path="input/",
+            processed_path="processed/",
+            file_name="f.csv",
+        ),
+        reference_date="2025-12-14T00:00:00.000+00:00",
+    )
     logger = MagicMock()
 
-    reader = BlobCsvReader(blob_client, schema, settings, logger)
-
-    chunks = list(reader.iter_chunks())
+    # Patch the internal blob client creation to return our fake client
+    with patch.object(BlobCsvReader, "_create_blob_client", return_value=blob_client):
+        reader = BlobCsvReader(settings, logger)
+        chunks = list(reader.iter_chunks())
     assert len(chunks) == 1
 
     df = chunks[0]

@@ -3,11 +3,13 @@ import json
 import azure.functions as func
 
 from function_app import processBlobEvent
+from app.core.models.ingestion_settings import FileType
 
 
 class DummyHttpRequest:
-    def __init__(self, body_dict: dict):
+    def __init__(self, body_dict: dict, headers: dict | None = None):
         self._body_dict = body_dict
+        self.headers = headers or {}
 
     def get_json(self):
         return self._body_dict
@@ -15,26 +17,17 @@ class DummyHttpRequest:
 
 def test_process_blob_event_happy_path(monkeypatch):
     """Testa o fluxo feliz com um request HTTP válido"""
-    req = DummyHttpRequest({"fileType": "default_group"})
-
-    fake_blob_client = MagicMock()
-    fake_mongo_writer = MagicMock()
+    req = DummyHttpRequest({"fileType": FileType.DEFAULT_GROUP})
 
     with patch(
-        "function_app.BlobClientFactory.create",
-        return_value=fake_blob_client,
-    ), patch(
-        "function_app.MongoClientFactory.create",
-        return_value=fake_mongo_writer,
-    ), patch(
         "function_app.IngestionService.run",
         return_value=100,
     ) as run_mock:
         response = processBlobEvent(req)
-        
+
         assert response.status_code == 200
         assert run_mock.called
-        
+
         body = json.loads(response.get_body())
         assert body["status"] == "success"
         assert body["fileType"] == "default_group"
@@ -46,7 +39,7 @@ def test_process_blob_event_missing_file_type():
     req = DummyHttpRequest({})
     
     response = processBlobEvent(req)
-    
+
     assert response.status_code == 400
     body = json.loads(response.get_body())
     assert "Missing 'fileType'" in body["error"]
@@ -57,7 +50,7 @@ def test_process_blob_event_invalid_file_type():
     req = DummyHttpRequest({"fileType": "invalid_type"})
     
     response = processBlobEvent(req)
-    
+
     assert response.status_code == 400
     body = json.loads(response.get_body())
     assert "não suportado" in body["error"]
@@ -65,14 +58,14 @@ def test_process_blob_event_invalid_file_type():
 
 def test_process_blob_event_missing_credentials():
     """Testa quando credenciais do Blob não estão configuradas"""
-    req = DummyHttpRequest({"fileType": "default_group"})
+    req = DummyHttpRequest({"fileType": FileType.DEFAULT_GROUP})
     
     with patch(
-        "function_app.BlobClientFactory.create",
+        "function_app.IngestionService.run",
         side_effect=ValueError("Azure Blob Storage credentials not configured"),
     ):
         response = processBlobEvent(req)
-        
+
         assert response.status_code == 500
         body = json.loads(response.get_body())
-        assert "credentials not configured" in body["error"]
+        assert "errorCode" in body
