@@ -1,0 +1,7 @@
+cod_grupo_limite_posicao,nome_grupo_limite_posicao,cod_cobranca_automatica,num_documento_integrante
+1,Default Group A,True,doc-1001
+1,Default Group A,False,doc-1002
+2,Default Group B,True,doc-2001
+2,Default Group B,False,doc-2002
+3,Default Group C,True,doc-3001
+1,Default Group A,True,doc-1001

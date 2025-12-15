@@ -68,8 +68,17 @@ class MongoWriter:
         self._ensure_metrics()
         self._ensure_client()
 
+        def _build_filter(document: dict, keys: List[str]) -> dict:
+            # If multiple key fields are provided the original implementation
+            # used a composite `_id` document for the filter which performs
+            # much better when there's an index on `_id` with that shape.
+            if len(keys) == 1:
+                return {keys[0]: document[keys[0]]}
+            # use composite _id for multi-key upserts
+            return {"_id": {k: document[k] for k in keys}}
+
         operations = [
-            UpdateOne({field: doc[field] for field in key_fields}, {"$set": doc}, upsert=True)
+            UpdateOne(_build_filter(doc, key_fields), {"$set": doc}, upsert=True)
             for doc in docs
         ]
 
