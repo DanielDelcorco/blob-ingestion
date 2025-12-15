@@ -1,8 +1,7 @@
-from ast import List
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Optional
-from xmlrpc.client import DateTime
+from typing import Dict, Optional, List
+from datetime import datetime
 
 class FileType(Enum):
     DEFAULT_GROUP = "default_group"
@@ -37,11 +36,11 @@ class FileSchema:
     sep: str = ";"
 
 @dataclass
-class   IngestionSettings:
-    chunk_size: int = 50_000
-    max_workers: int = 5
-    encoding: str = "cp1252"
+class IngestionSettings:
     schema: FileSchema
     mongo: MongoSettings
     blob: BlobSettings
-    reference_date: DateTime
+    reference_date: str
+    chunk_size: int = 50_000
+    max_workers: int = 5
+    encoding: str = "cp1252"

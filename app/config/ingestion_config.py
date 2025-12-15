@@ -8,7 +8,8 @@ from app.core.models.ingestion_settings import BlobSettings, FileSchema, FileTyp
 # Mapeamento de tipos de arquivo para suas configurações
 FILE_TYPES_CONFIG: Dict[FileType, IngestionSettings] = {
     FileType.DEFAULT_GROUP: IngestionSettings(
-        reference_date=datetime.now().strftime("%Y-%m-%dT%H:%M:%S.000+00:00"),
+        # reference_date should reflect execution minute (seconds fixed to 00)
+        reference_date=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:00.000+00:00"),
         schema=FileSchema(
             name="default_group",
             column_mapping={
@@ -35,7 +36,8 @@ FILE_TYPES_CONFIG: Dict[FileType, IngestionSettings] = {
         )
     ),
     FileType.CUSTOMER_DATA: IngestionSettings(
-        reference_date=datetime.now().strftime("%Y-%m-%dT%H:%M:%S.000+00:00"),
+        # reference_date should reflect execution minute (seconds fixed to 00)
+        reference_date=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:00.000+00:00"),
         schema=FileSchema(
             name="default_group",
             column_mapping={
@@ -72,7 +74,7 @@ def get_ingestion_settings(file_type: FileType) -> IngestionSettings:
         )
     settings = FILE_TYPES_CONFIG[file_type]
     # Validate configured key_fields against schema mapping before returning
-    if getattr(settings, "key_fields", None):
+    if getattr(settings.schema, "key_fields", None):
         mapped_fields = set(settings.schema.column_mapping.values())
         missing = [k for k in settings.schema.key_fields if k not in mapped_fields]
         if missing:

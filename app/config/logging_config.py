@@ -1,7 +1,6 @@
 import contextvars
 import http
 import logging
-import pythonjsonlogger as jsonlogger
 from opentelemetry import trace, baggage
 
 
@@ -61,15 +60,26 @@ def configure_logging() -> logging.Logger:
 
     logger.propagate = False
 
-    if not logger.hasHandlers:
+    if not logger.hasHandlers():
         handler = logging.StreamHandler()
 
-        fmt = ("%(asctime)s %(levelname)s %(name)s %(correlation_id)s "
-        "%(trace_id)s %(span_id)s %(module)s %(funcName)s %(lineno)d %(message)s"
+        fmt = (
+            "%(asctime)s %(levelname)s %(name)s %(correlation_id)s "
+            "%(trace_id)s %(span_id)s %(module)s %(funcName)s %(lineno)d %(message)s"
         )
 
-        json_formatter = jsonlogger.JsonFormatter(fmt)
-        handler.setFormatter(json_formatter)
+        try:
+            # import the moved module path when available
+            from pythonjsonlogger import json as _jsonlogger
+            formatter = _jsonlogger.JsonFormatter(fmt)
+        except Exception:
+            try:
+                from pythonjsonlogger import jsonlogger as _jsonlogger
+                formatter = _jsonlogger.JsonFormatter(fmt)
+            except Exception:
+                formatter = logging.Formatter(fmt)
+
+        handler.setFormatter(formatter)
         handler.addFilter(OTelTraceFilter())
         logger.addHandler(handler)
 
@@ -80,4 +90,6 @@ def configure_logging() -> logging.Logger:
         http.client.HTTPConnection.debuglevel = 1
 
         logging.basicConfig(level=logging.INFO)
+
+    return logger
 
